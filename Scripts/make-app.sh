@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="CCMAutoStoppingBar"
 BUNDLE_ID="io.harness.ccm-autostopping-macbar"
-VERSION="${1:-0.0.1}"
+VERSION="${1:?Usage: Scripts/make-app.sh <version>, e.g. Scripts/make-app.sh 0.0.3}"
 
 OUT_DIR="$ROOT/dist"
 APP_DIR="$OUT_DIR/$APP_NAME.app"
