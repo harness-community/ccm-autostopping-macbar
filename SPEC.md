@@ -89,6 +89,24 @@ no third-party dependencies — this is a few hundred lines, stdlib is enough.
 `NSApp.setActivationPolicy(.accessory)` at launch keeps it out of the Dock
 without needing an Info.plist/bundle.
 
+## Pinning
+
+A new view preference, independent of the Harness settings: **Show Only Pinned**
+(a checkable menu item, persisted in `UserDefaults`). Pin state itself is a
+set of rule IDs, also in `UserDefaults`.
+
+- Clicking a rule's name/status row toggles its pin (left-hand icon flips
+  between a hollow pin and a filled yellow pin — clicking the row is the pin
+  toggle, it's not just a label anymore).
+- **Show All** (default): pinned rules are sorted to the top, everything
+  else follows, both groups alphabetical.
+- **Show Only Pinned**: only pinned rules appear in the main list. Below
+  them is an **"All Rules (N)"** item with a submenu — that submenu lists
+  every unpinned rule (same name/status/pin-icon/Start/Stop as the main
+  list), so you can pin more without switching back to Show All.
+- Start/Stop works identically regardless of where the rule is being viewed
+  from (top-level list or the All Rules submenu).
+
 ## Known gaps / out of scope for v1
 
 - Only reads `HARNESS_PLATFORM_API_KEY`/`HARNESS_ACCOUNT_ID` — no UI for

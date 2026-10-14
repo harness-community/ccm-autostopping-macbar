@@ -33,6 +33,23 @@ enum SettingsStore {
     }
 }
 
+// Pin list + show-all/pinned-only toggle. Not secret, plain UserDefaults is fine.
+enum ViewPreferences {
+    private static let pinnedKey = "pinnedRuleIDs"
+    private static let showPinnedOnlyKey = "showPinnedOnly"
+
+    static func pinnedIDs() -> Set<Int> {
+        Set((UserDefaults.standard.array(forKey: pinnedKey) as? [Int]) ?? [])
+    }
+
+    static func save(pinnedIDs: Set<Int>) {
+        UserDefaults.standard.set(Array(pinnedIDs), forKey: pinnedKey)
+    }
+
+    static func showPinnedOnly() -> Bool { UserDefaults.standard.bool(forKey: showPinnedOnlyKey) }
+    static func save(showPinnedOnly: Bool) { UserDefaults.standard.set(showPinnedOnly, forKey: showPinnedOnlyKey) }
+}
+
 // MARK: - Harness API client
 
 struct HarnessConfig {
@@ -133,6 +150,7 @@ struct RuleRow {
     let name: String
     let disabled: Bool
     var state: String // "active" | "down" | "warmingup" | "coolingdown" | "unknown" | "loading"
+    var pinned: Bool
 
     var color: NSColor {
         switch state {
@@ -205,6 +223,10 @@ private enum Style {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(paletteColors: [color]))
     }
+
+    static func pinSymbol(pinned: Bool) -> NSImage? {
+        symbol(pinned ? "pin.fill" : "pin", color: pinned ? .systemYellow : .tertiaryLabelColor)
+    }
 }
 
 // MARK: - App delegate
@@ -218,6 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastCheckedAt: Date?
     private var pollingRuleIDs: Set<Int> = []
     private let refreshIntervalSeconds: TimeInterval = 30
+    private var pinnedRuleIDs: Set<Int> = ViewPreferences.pinnedIDs()
+    private var showPinnedOnly: Bool = ViewPreferences.showPinnedOnly()
 
     private var settingsWindow: NSWindow?
     private let urlField = NSTextField()
@@ -271,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if pollingRuleIDs.contains(rule.id), let existing = existingByID[rule.id] {
                         return existing
                     }
-                    return RuleRow(id: rule.id, name: rule.name, disabled: rule.disabled, state: healthByID[rule.id] ?? "unknown")
+                    return RuleRow(id: rule.id, name: rule.name, disabled: rule.disabled, state: healthByID[rule.id] ?? "unknown", pinned: pinnedRuleIDs.contains(rule.id))
                 }
             errorMessage = nil
         } catch {
@@ -297,27 +321,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.addItem(.separator())
 
+        let modeItem = NSMenuItem(title: "", action: #selector(toggleModeTapped), keyEquivalent: "")
+        modeItem.attributedTitle = NSAttributedString(string: "Show Only Pinned", attributes: Style.name)
+        modeItem.state = showPinnedOnly ? .on : .off
+        modeItem.target = self
+        menu.addItem(modeItem)
+        menu.addItem(.separator())
+
         if rows.isEmpty, errorMessage == nil {
             menu.addItem(withTitle: "Loading rules…", action: nil, keyEquivalent: "")
         }
 
-        for row in rows {
-            let header = NSMenuItem()
-            header.attributedTitle = Style.rowTitle(row)
-            header.isEnabled = false
-            menu.addItem(header)
+        let pinnedRows = rows.filter { $0.pinned }
+        let unpinnedRows = rows.filter { !$0.pinned }
 
-            if let actionTitle = row.actionTitle {
-                let isStart = actionTitle == "Start"
-                let color: NSColor = isStart ? .systemGreen : .systemRed
-                let item = NSMenuItem(title: "", action: #selector(startStopTapped(_:)), keyEquivalent: "")
-                item.attributedTitle = Style.actionTitle("    \(actionTitle)", color: color)
-                item.image = Style.symbol(isStart ? "play.fill" : "stop.fill", color: color)
-                item.target = self
-                item.tag = row.id
-                item.representedObject = actionTitle
-                menu.addItem(item)
+        if showPinnedOnly {
+            if pinnedRows.isEmpty, !rows.isEmpty {
+                menu.addItem(withTitle: "No pinned rules yet — pin some from \"All Rules\" below", action: nil, keyEquivalent: "")
             }
+            for row in pinnedRows { addRuleItems(row, to: menu) }
+
+            menu.addItem(.separator())
+            let allItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            allItem.attributedTitle = NSAttributedString(string: "All Rules (\(unpinnedRows.count))", attributes: Style.name)
+            allItem.image = Style.symbol("list.bullet", color: .secondaryLabelColor)
+            let submenu = NSMenu()
+            if unpinnedRows.isEmpty {
+                submenu.addItem(withTitle: rows.isEmpty ? "Loading…" : "Everything is pinned", action: nil, keyEquivalent: "")
+            } else {
+                for row in unpinnedRows { addRuleItems(row, to: submenu) }
+            }
+            allItem.submenu = submenu
+            menu.addItem(allItem)
+        } else {
+            for row in pinnedRows + unpinnedRows { addRuleItems(row, to: menu) }
         }
 
         menu.addItem(.separator())
@@ -344,6 +381,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         statusItem.menu = menu
+    }
+
+    /// Adds a rule's header (name/status, click to pin/unpin) and its Start/Stop action, if any,
+    /// to the given menu. Shared between the top-level menu and the "All Rules" submenu so pinning
+    /// works the same way from either place.
+    @MainActor
+    private func addRuleItems(_ row: RuleRow, to menu: NSMenu) {
+        let header = NSMenuItem(title: "", action: #selector(pinTapped(_:)), keyEquivalent: "")
+        header.attributedTitle = Style.rowTitle(row)
+        header.image = Style.pinSymbol(pinned: row.pinned)
+        header.target = self
+        header.tag = row.id
+        header.toolTip = row.pinned ? "Click to unpin" : "Click to pin to the top"
+        menu.addItem(header)
+
+        if let actionTitle = row.actionTitle {
+            let isStart = actionTitle == "Start"
+            let color: NSColor = isStart ? .systemGreen : .systemRed
+            let item = NSMenuItem(title: "", action: #selector(startStopTapped(_:)), keyEquivalent: "")
+            item.attributedTitle = Style.actionTitle("    \(actionTitle)", color: color)
+            item.image = Style.symbol(isStart ? "play.fill" : "stop.fill", color: color)
+            item.target = self
+            item.tag = row.id
+            item.representedObject = actionTitle
+            menu.addItem(item)
+        }
+    }
+
+    @MainActor @objc private func toggleModeTapped() {
+        showPinnedOnly.toggle()
+        ViewPreferences.save(showPinnedOnly: showPinnedOnly)
+        rebuildMenu()
+    }
+
+    @MainActor @objc private func pinTapped(_ sender: NSMenuItem) {
+        let ruleID = sender.tag
+        if pinnedRuleIDs.contains(ruleID) {
+            pinnedRuleIDs.remove(ruleID)
+        } else {
+            pinnedRuleIDs.insert(ruleID)
+        }
+        ViewPreferences.save(pinnedIDs: pinnedRuleIDs)
+        if let idx = rows.firstIndex(where: { $0.id == ruleID }) {
+            rows[idx].pinned = pinnedRuleIDs.contains(ruleID)
+        }
+        rebuildMenu()
     }
 
     @objc private func refreshTapped() {
