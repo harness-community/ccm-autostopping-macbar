@@ -1,0 +1,14 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+.DS_Store
+
+# This project's packaged app output (built by Scripts/make-app.sh)
+dist/
