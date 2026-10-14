@@ -28,20 +28,24 @@ Only works on Apple Silicon Macs today (arm64 build only — see "Known gaps").
 ## Building the distributable (for whoever is packaging a release)
 
 ```sh
-./Scripts/make-app.sh [version]   # version defaults to 0.0.1
+make package VERSION=0.0.3   # VERSION is required, fails without it
 ```
 
 This builds a release binary, wraps it into `dist/CCMAutoStoppingBar.app`
 (with a proper `Info.plist`, `LSUIElement` so it never shows in the Dock),
 ad-hoc signs it so it'll run at all, and zips it to
 `dist/CCMAutoStoppingBar-<version>-macos-arm64.zip`. Share that zip (Slack,
-shared drive, internal wiki — wherever). Re-run the script any time you want
-to cut a new build after code changes.
+shared drive, internal wiki — wherever). Re-run any time you want to cut a
+new build after code changes, with a new version number.
+
+(`make package` just calls `Scripts/make-app.sh <version>` — same thing, if
+you'd rather skip `make`.)
 
 ## Developing / running from source
 
 ```sh
-swift run
+make build   # swift build
+make run     # builds, then swift run
 ```
 
 Needs these env vars set, *or* just use the in-app Settings window once it's
@@ -56,8 +60,10 @@ running (Settings takes priority over env vars either way):
 - `Package.swift` — plain SPM executable, no dependencies.
 - `Sources/CCMAutoStoppingBar/main.swift` — the whole app (AppKit status item,
   Settings window, Keychain storage, Harness API client).
-- `Scripts/make-app.sh` — builds and packages the `.app` + zip for distribution.
-- `dist/` — build output (gitignored; regenerate with `make-app.sh`).
+- `Makefile` — `build`/`run`/`package` entry points.
+- `Scripts/make-app.sh` — builds and packages the `.app` + zip for distribution
+  (called by `make package`).
+- `dist/` — build output (gitignored; regenerate with `make package`).
 
 ## Known gaps
 
